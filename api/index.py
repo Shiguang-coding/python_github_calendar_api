@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 def list_split(items, n):
     return [items[i:i + n] for i in range(0, len(items), n)]
 
+def ordinal_to_int(s):
+    return int(re.sub(r'(st|nd|rd|th)', '', s))
+
 def getdata(name):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -16,30 +19,26 @@ def getdata(name):
     gitpage = requests.get("https://github.com/users/" + name + "/contributions", headers=headers)
     data = gitpage.text
 
-    date_pattern = re.compile(r'(\d+) contributions? on (\w+ \d+, \d{4})\.')
-    no_contrib_pattern = re.compile(r'No contributions? on (\w+ \d+, \d{4})\.')
-
+    today = datetime.utcnow()
     contributions_map = {}
 
-    for match in date_pattern.finditer(data):
+    for match in re.finditer(r'(\d+) contributions? on ([A-Za-z]+ \d+\w*)\.', data):
         count = int(match.group(1))
-        date_str = match.group(2)
+        entry = match.group(2)
+        m = re.match(r'([A-Za-z]+) (\d+\w*)', entry)
+        if not m:
+            continue
+        month_str, day_str = m.group(1), m.group(2)
+        day = ordinal_to_int(day_str)
         try:
-            date_obj = datetime.strptime(date_str, "%B %d, %Y")
-            date_key = date_obj.strftime("%Y-%m-%d")
-            contributions_map[date_key] = count
+            dt_no_year = datetime.strptime(f"{month_str} {day}", "%B %d")
         except ValueError:
             continue
-
-    for match in no_contrib_pattern.finditer(data):
-        date_str = match.group(1)
-        try:
-            date_obj = datetime.strptime(date_str, "%B %d, %Y")
-            date_key = date_obj.strftime("%Y-%m-%d")
-            if date_key not in contributions_map:
-                contributions_map[date_key] = 0
-        except ValueError:
-            continue
+        year = today.year
+        dt = dt_no_year.replace(year=year)
+        if dt > today + timedelta(days=1):
+            dt = dt.replace(year=year - 1)
+        contributions_map[dt.strftime("%Y-%m-%d")] = count
 
     if not contributions_map:
         return {"total": 0, "contributions": []}
@@ -48,9 +47,7 @@ def getdata(name):
     first_date = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
     last_date = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
 
-    first_sunday = first_date - timedelta(days=first_date.weekday() + 1)
-    if first_sunday > first_date:
-        first_sunday -= timedelta(days=7)
+    first_sunday = first_date - timedelta(days=(first_date.weekday() + 1) % 7)
 
     all_dates = []
     current = first_sunday
