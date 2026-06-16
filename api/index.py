@@ -3,13 +3,9 @@ import requests
 import re
 from http.server import BaseHTTPRequestHandler
 import json
-from datetime import datetime, timedelta
 
 def list_split(items, n):
     return [items[i:i + n] for i in range(0, len(items), n)]
-
-def ordinal_to_int(s):
-    return int(re.sub(r'(st|nd|rd|th)', '', s))
 
 def getdata(name):
     headers = {
@@ -19,48 +15,24 @@ def getdata(name):
     gitpage = requests.get("https://github.com/users/" + name + "/contributions", headers=headers)
     data = gitpage.text
 
-    today = datetime.utcnow()
-    contributions_map = {}
+    pattern = re.compile(
+        r'data-date="(\d{4}-\d{2}-\d{2})".*?class="sr-only position-absolute">(.*?)</tool-tip>',
+        re.DOTALL
+    )
+    matches = pattern.findall(data)
 
-    for match in re.finditer(r'(\d+) contributions? on ([A-Za-z]+ \d+\w*)\.', data):
-        count = int(match.group(1))
-        entry = match.group(2)
-        m = re.match(r'([A-Za-z]+) (\d+\w*)', entry)
-        if not m:
-            continue
-        month_str, day_str = m.group(1), m.group(2)
-        day = ordinal_to_int(day_str)
-        try:
-            dt_no_year = datetime.strptime(f"{month_str} {day}", "%B %d")
-        except ValueError:
-            continue
-        year = today.year
-        dt = dt_no_year.replace(year=year)
-        if dt > today + timedelta(days=1):
-            dt = dt.replace(year=year - 1)
-        contributions_map[dt.strftime("%Y-%m-%d")] = count
-
-    if not contributions_map:
+    if not matches:
         return {"total": 0, "contributions": []}
 
-    sorted_dates = sorted(contributions_map.keys())
-    first_date = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
-    last_date = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
+    datalist = []
+    for date_str, tooltip in matches:
+        count_match = re.search(r'(\d+) contributions?', tooltip)
+        count = int(count_match.group(1)) if count_match else 0
+        datalist.append({"date": date_str, "count": count})
 
-    first_sunday = first_date - timedelta(days=(first_date.weekday() + 1) % 7)
-
-    all_dates = []
-    current = first_sunday
-    while current <= last_date:
-        date_key = current.strftime("%Y-%m-%d")
-        all_dates.append({
-            "date": date_key,
-            "count": contributions_map.get(date_key, 0)
-        })
-        current += timedelta(days=1)
-
-    total = sum(item["count"] for item in all_dates)
-    datalistsplit = list_split(all_dates, 7)
+    datalist.sort(key=lambda x: x["date"])
+    total = sum(item["count"] for item in datalist)
+    datalistsplit = list_split(datalist, 7)
 
     return {
         "total": total,
